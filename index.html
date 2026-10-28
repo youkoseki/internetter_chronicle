@@ -223,7 +223,7 @@
   'use strict';
 
   // ================= 設定 =================
-  const TSV_PATH = 'meme.tsv';   // ミームリスト。行を足せば自動で反映される
+  const TSV_PATH = 'events.tsv';   // 出来事リスト。行を足せば自動で反映される
   const GOAL = 10;               // 何個並べたらクリアか
   const FEEDBACK_MS = 1600;      // 不正解時に正しい日付を見せる時間
   const OK_MS = 500;             // 正解時の演出時間
@@ -599,7 +599,7 @@
       $('startBtn').textContent = '読み込み失敗';
       const err = $('errorMsg');
       err.classList.remove('hidden');
-      err.textContent = 'meme.tsv を読み込めませんでした(' + e.message + ')。' +
+      err.textContent = 'events.tsv を読み込めませんでした(' + e.message + ')。' +
         'ローカルではWebサーバー経由で開いてください。';
     }
   }
