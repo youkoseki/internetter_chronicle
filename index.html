@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>インターネッタークロニクル</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --panel: #f3f4f8;
+    --card: #eef1f7;
+    --text: #222633;
+    --sub: #6b7285;
+    --accent: #ffc928;
+    --accent-text: #b36b00;   /* 白背景で読める濃いめの黄土色 */
+    --ok: #2fbf71;
+    --ng: #e5484d;
+    --ng-bg: #fdecec;
+    --line: #c5cad8;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  }
+  body { min-height: 100dvh; display: flex; flex-direction: column; }
+  .hidden { display: none !important; }
+
+  /* ---------- 共通ボタン ---------- */
+  button {
+    font: inherit; color: inherit; border: 0; cursor: pointer;
+    touch-action: manipulation;
+  }
+  .btn {
+    background: var(--accent); color: #222; font-weight: 700;
+    padding: 14px 32px; border-radius: 999px; font-size: 18px;
+  }
+
+  /* ---------- タイトル / 結果画面 ---------- */
+  .screen {
+    flex: 1 0 auto; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px;
+    padding: 24px 16px; text-align: center;
+  }
+  .screen h1 { font-size: 40px; margin: 0; color: var(--accent-text); letter-spacing: .05em; }
+  .screen h1.app-title { font-size: clamp(24px, 8.5vw, 40px); letter-spacing: 0; line-height: 1.3; }
+  /* 効果音のトグルスイッチ */
+  .toggle { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 15px; color: var(--text); user-select: none; }
+  .toggle input { position: absolute; opacity: 0; width: 0; height: 0; }   /* 見た目は .track で作る(キーボード操作は維持) */
+  .toggle .track { position: relative; width: 44px; height: 26px; border-radius: 999px; background: #c5cad8; transition: background .2s; }
+  .toggle .knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0004; transition: transform .2s; }
+  .toggle input:checked + .track { background: var(--accent); }
+  .toggle input:checked + .track .knob { transform: translateX(18px); }
+  .toggle input:focus-visible + .track { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+
+  /* 結果画面の共有ボタン */
+  .share { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .btn-share {
+    display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 999px;
+    color: #fff; font-weight: 700; font-size: 15px; text-decoration: none;
+  }
+  .btn-share svg { width: 16px; height: 16px; fill: currentColor; }
+  .btn-share.x { background: #14171a; }
+  .btn-share.bsky { background: #1185fe; }
+
+  .screen p { margin: 0; color: var(--sub); line-height: 1.7; }
+  .result-row { font-size: 20px; }
+  .result-row b { color: var(--accent-text); font-size: 28px; }
+  .score { font-size: 14px; color: var(--sub); }
+  #errorMsg { color: var(--ng); }
+
+  /* ---------- ゲーム画面 ---------- */
+  #game { display: flex; flex-direction: column; flex: 1 0 auto; }
+
+  /* 上部の固定バー: 時間・ミス・進捗 */
+  .hud {
+    position: sticky; top: 0; z-index: 10; background: var(--panel);
+    padding: 8px 16px; padding-top: calc(8px + env(safe-area-inset-top));
+    display: flex; justify-content: space-between; font-variant-numeric: tabular-nums;
+    font-size: 15px; box-shadow: 0 1px 6px #0002;
+  }
+  .hud b { color: var(--accent-text); }
+
+  /* 今回置くミーム(日付は伏せる) */
+  .current {
+    position: sticky; top: calc(38px + env(safe-area-inset-top)); z-index: 9;
+    margin: 0; padding: 12px 16px; background: var(--bg);
+  }
+  .current .card {
+    background: var(--accent); color: #222; font-weight: 700; font-size: 20px;
+    border-radius: 14px; padding: 16px; text-align: center;
+    box-shadow: 0 3px 10px #0003;
+  }
+  .current .hint { margin-top: 6px; font-size: 12px; line-height: 1.5; color: var(--sub); text-align: center; }
+  /* 判定演出 */
+  .current .card.ok { background: var(--ok); }
+  .current .card.ng { background: var(--ng); color: #fff; }
+  .current .reveal.ng { color: var(--ng); font-weight: 700; }
+  .current .reveal { margin-top: 6px; text-align: center; font-size: 14px; min-height: 20px; }
+
+  /* 並べ済みのタイムライン */
+  .timeline { padding: 4px 16px 40px; display: flex; flex-direction: column; }
+  .slot {
+    height: 36px; margin: 2px 0; border-radius: 10px;
+    border: 2px dashed var(--line); background: transparent; color: var(--sub);
+    font-size: 13px; width: 100%;
+  }
+  .slot:active { background: #ffc92833; border-color: var(--accent); color: var(--accent-text); }
+  .slot:disabled { opacity: .35; }
+  /* 「古い」「新しい」ラベル */
+  .axis { text-align: center; font-size: 12px; font-weight: 700; color: var(--sub); padding: 2px 0; }
+  /* 並べ済みカード: 日付・タイトル・出典リンクを1行に収める */
+  .placed {
+    background: var(--card); border-radius: 10px; padding: 9px 12px;
+    display: flex; align-items: center; gap: 8px; min-width: 0;
+  }
+  .placed .date { color: var(--accent-text); font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .placed .title { font-size: 14px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .placed a { color: var(--sub); font-size: 12px; text-decoration: none; white-space: nowrap; }
+  .placed.new { animation: pop .5s ease; }
+  /* 直前に置いたカード: 次に置くまで濃い色のままにして、どこに入ったか分かるようにする */
+  .placed.latest { background: #c9d4ee; }
+  @keyframes pop {
+    0% { background: var(--ok); transform: scale(1.04); }
+    100% { transform: scale(1); }
+  }
+  /* 不正解時に「本来ここに入る」ことを示すゴースト */
+  .placed.ghost { background: #2fbf7122; border: 2px dashed var(--ok); animation: blink .4s ease 2; }
+  @keyframes blink { 50% { background: #2fbf7166; } }
+
+  /* 結果一覧 */
+  #result.screen { justify-content: flex-start; padding-top: calc(24px + env(safe-area-inset-top)); padding-bottom: 40px; }
+  .results { width: 100%; display: flex; flex-direction: column; gap: 4px; text-align: left; }
+  /* 結果一覧では文字を切らない(ゲーム中は1行表示のまま) */
+  .results .placed { align-items: flex-start; }
+  .results .placed .title { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+  .results .placed .date, .results .placed .mark { flex: none; }
+  .results .placed.miss { background: var(--ng-bg); border-left: 4px solid var(--ng); }
+  .results .placed.miss .date { color: var(--ng); }
+  .results .placed.miss .title { color: var(--ng); }
+  .results .placed.hit { border-left: 4px solid var(--ok); }
+  .results .mark { font-weight: 700; }
+  .legend { font-size: 12px; color: var(--sub); }
+
+  /* ---------- フッター ---------- */
+  .site-footer {
+    flex: none; display: flex; justify-content: center; align-items: center; gap: 14px;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+    border-top: 1px solid #e3e6ef; background: var(--panel);
+    font-size: 13px; color: var(--sub);
+  }
+  .site-footer a { color: inherit; text-decoration: none; }
+  .site-footer a:hover, .site-footer a:active { color: var(--accent-text); }
+  .site-footer .bsky { display: inline-flex; padding: 4px; }   /* アイコンのタップ領域を広げる */
+  .site-footer svg { width: 20px; height: 20px; fill: currentColor; }
+</style>
+</head>
+<body>
+
+<!-- アイコン定義(フッターと共有ボタンで共用) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-bsky" viewBox="0 0 24 24"><path d="M12 10.8c-1.087-2.114-4.046-6.053-6.798-7.995C2.566.944 1.561 1.266.902 1.565.139 1.908 0 3.08 0 3.768c0 .69.378 5.65.624 6.479.815 2.736 3.713 3.66 6.383 3.364.136-.02.275-.039.415-.056-.138.022-.276.04-.415.056-3.912.58-7.387 2.005-2.83 7.078 5.013 5.19 6.87-1.113 7.823-4.308.953 3.195 2.05 9.271 7.733 4.308 4.267-4.308 1.172-6.498-2.74-7.078a8.741 8.741 0 0 1-.415-.056c.14.017.279.036.415.056 2.67.297 5.568-.628 6.383-3.364.246-.828.624-5.79.624-6.478 0-.69-.139-1.861-.902-2.206-.659-.298-1.664-.62-4.3 1.24C16.046 4.748 13.087 8.687 12 10.8Z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z"/></symbol>
+</svg>
+
+<!-- ===== タイトル画面 ===== -->
+<section id="title" class="screen">
+  <h1 class="app-title">インターネッター<wbr>クロニクル</h1>
+  <p>表示される出来事を、正しい順番で並べよう<br>
+     <span id="goalText">10</span>個並べるまでのタイムとミスの少なさを競います</p>
+  <p id="errorMsg" class="hidden"></p>
+  <label class="toggle">
+    <input type="checkbox" id="soundToggle" checked>
+    <span class="track"><span class="knob"></span></span>
+    <span>効果音</span>
+  </label>
+  <button id="startBtn" class="btn" disabled>読み込み中…</button>
+  <p id="bestText" class="score"></p>
+</section>
+
+<!-- ===== ゲーム画面 ===== -->
+<main id="game" class="hidden">
+  <div class="hud">
+    <span>⏱ <b id="timer">0</b>s</span>
+    <span>✔ <b id="progress">0</b>/<span id="goal">10</span></span>
+    <span>✖ <b id="misses">0</b></span>
+  </div>
+  <div class="current">
+    <div id="currentCard" class="card"></div>
+    <div id="reveal" class="reveal"></div>
+    <div id="hint" class="hint"></div>
+  </div>
+  <div id="timeline" class="timeline"></div>
+</main>
+
+<!-- ===== 結果画面 ===== -->
+<section id="result" class="screen hidden">
+  <h1 id="rTitle">クリア!</h1>
+  <div class="result-row">タイム <b id="rTime"></b> 秒</div>
+  <div class="result-row">ミス <b id="rMiss"></b> 回</div>
+  <div class="score" id="rBest"></div>
+  <button id="retryBtn" class="btn">もう一回</button>
+  <!-- クリアしたときだけ表示。リンクは finishGame で組み立てる -->
+  <div id="share" class="share hidden">
+    <a id="shareX" class="btn-share x" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x"/></svg>Xに投稿</a>
+    <a id="shareBsky" class="btn-share bsky" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bsky"/></svg>Blueskyに投稿</a>
+  </div>
+  <div class="legend">日付順の一覧(<span style="color:var(--ok)">緑＝正解</span> / <span style="color:var(--ng)">赤＝ミスで破棄</span>)</div>
+  <div id="resultList" class="results"></div>
+</section>
+
+<!-- ===== フッター ===== -->
+<footer class="site-footer">
+  <a href="https://youkoseki.com/" target="_blank" rel="noopener">制作: 小関悠</a>
+  <!-- Bluesky(蝶のロゴ) -->
+  <a class="bsky" href="https://bsky.app/profile/youkoseki.com" target="_blank" rel="noopener" aria-label="Bluesky">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bsky"/></svg>
+  </a>
+</footer>
+
+<script>
+(() => {
+  'use strict';
+
+  // ================= 設定 =================
+  const TSV_PATH = 'meme.tsv';   // ミームリスト。行を足せば自動で反映される
+  const GOAL = 10;               // 何個並べたらクリアか
+  const FEEDBACK_MS = 1600;      // 不正解時に正しい日付を見せる時間
+  const OK_MS = 500;             // 正解時の演出時間
+  const BEST_KEY = 'internetter-chronicle.best';
+  const SOUND_KEY = 'internetter-chronicle.sound';
+  // 共有するゲームのURL。空なら今開いているページのURLを使う(公開後に固定したいときだけ設定)
+  const SHARE_URL = '';
+
+  // ================= 状態 =================
+  let allMemes = [];   // tsvから読み込んだ全ミーム
+  let deck = [];       // 出題待ちの山札(シャッフル済み)
+  let placed = [];     // 正しく並べ済みのミーム(日付昇順)
+  let current = null;  // いま置こうとしているミーム
+  let misses = 0;
+  let goal = GOAL;
+  let startTime = 0;
+  let timerId = null;
+  let locked = false;  // 判定演出中は入力を受け付けない
+  let latest = null;   // 直前に正しく置いたミーム(濃く表示する)
+  let history = [];    // 結果一覧用: 出題したミームと正誤 {meme, ok}
+
+  const $ = id => document.getElementById(id);
+
+  // ================= TSV読み込み =================
+  // 1行目はヘッダ。列: できごと / 日(YYYYMMDD) / ソース / 年 / メモ
+  // 列順が変わっても動くよう、ヘッダ名で列を引く。
+  function parseTsv(text) {
+    const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim() !== '');
+    const header = lines.shift().split('\t');
+    const col = name => header.indexOf(name);
+    const iTitle = col('できごと'), iDate = col('日'), iSrc = col('ソース');
+
+    const memes = [];
+    for (const line of lines) {
+      const cells = line.split('\t');
+      const title = (cells[iTitle] || '').trim();
+      const date = (cells[iDate] || '').trim();
+      // 日付が8桁の数字になっていない行(未入力の行など)はスキップ
+      if (!title || !/^\d{8}$/.test(date)) continue;
+      memes.push({
+        title,
+        date: Number(date),            // 比較用の数値 (例: 19951123)
+        dateStr: date,
+        src: (cells[iSrc] || '').trim(),
+      });
+    }
+    return memes;
+  }
+
+  // 20001018 → 「2000年10月18日」。月日が00の場合は省略表示する
+  function formatDate(s) {
+    const y = Number(s.slice(0, 4)), m = Number(s.slice(4, 6)), d = Number(s.slice(6, 8));
+    return y + '年' + (m ? m + '月' : '') + (m && d ? d + '日' : '');
+  }
+
+  // Fisher-Yates シャッフル
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  // ================= 効果音 =================
+  // どれも小さな音量で短く鳴らす。音声ファイルは使わず、サイン波をその場で合成する。
+  let audioCtx = null;
+  let soundOn = true;   // タイトル画面のトグルで切り替え
+
+  // AudioContext を用意する。ブラウザはユーザー操作の中でしか音を許可しないので、
+  // スタートボタンのクリックから呼んで「解除」しておく。使えない環境では何もしない。
+  function unlockAudio() {
+    try {
+      if (!audioCtx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) audioCtx = new AC();
+      }
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) { /* 音が鳴らないだけなので無視 */ }
+  }
+
+  // 1音を鳴らす。freq: 周波数(Hz) / at: 何秒後に鳴らすか / dur: 長さ(秒) / vol: 音量(0〜1)
+  // 立ち上がりと減衰をなだらかにして、プツッというノイズが出ないようにする。
+  function tone(freq, at, dur, vol, endFreq) {
+    if (!audioCtx) return;
+    const t0 = audioCtx.currentTime + at;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, t0);
+    // endFreq があれば、音程をなめらかに動かす(ミス音の下降など)
+    if (endFreq) osc.frequency.exponentialRampToValueAtTime(endFreq, t0 + dur);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.012);      // 立ち上がり
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);     // 減衰
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
+  }
+
+  function playSound(kind) {
+    if (!soundOn) return;
+    try {
+      if (kind === 'ok') {            // 正解: 軽く上がる2音
+        tone(660, 0, 0.12, 0.05);
+        tone(880, 0.07, 0.16, 0.05);
+      } else if (kind === 'ng') {     // ミス: 低めの短い下降音
+        tone(240, 0, 0.22, 0.06, 150);
+      } else if (kind === 'clear') {  // クリア: ド・ミ・ソ・高いドの短い上昇音
+        [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.09, 0.22, 0.05));
+      }
+    } catch (e) { /* 音が鳴らないだけなので無視 */ }
+  }
+
+  // ================= ゲーム進行 =================
+  function startGame() {
+    unlockAudio();   // ボタン操作の中で呼ぶ必要がある
+    playSound('ok'); // 開始の合図に、正解と同じ音を鳴らす
+    // 最初の1枚(基準)+ 並べる分が必要。ミームが少ないときはゴールを減らす
+    goal = Math.min(GOAL, allMemes.length - 1);
+    deck = shuffle(allMemes);
+    placed = [deck.pop()];   // 最初に表示される基準ミーム(日付つき)
+    misses = 0;
+    latest = null;
+    history = [{ meme: placed[0], ok: true }];   // 基準ミームは正解扱いで一覧に載せる
+    locked = false;
+    $('goal').textContent = goal;
+
+    show('game');
+    nextCard();
+    render();
+
+    // タイマー開始(最初のカードが表示された時点から)
+    startTime = performance.now();
+    clearInterval(timerId);
+    timerId = setInterval(updateTimer, 250);
+    updateTimer();
+  }
+
+  // 山札から次のミームを引く
+  function nextCard() {
+    current = deck.pop();
+    const card = $('currentCard');
+    card.textContent = current.title;
+    card.className = 'card';
+    $('reveal').textContent = '';
+    $('reveal').className = 'reveal';
+  }
+
+  // スロット index に置けるか判定する。
+  // 左隣 <= 正解日 <= 右隣 であれば正解(同日のミームは前後どちらでもOK)
+  function isCorrect(index) {
+    const left = placed[index - 1], right = placed[index];
+    return (!left || left.date <= current.date) &&
+           (!right || current.date <= right.date);
+  }
+
+  function onSlot(index) {
+    if (locked) return;
+    locked = true;
+    const card = $('currentCard');
+    const ok = isCorrect(index);
+
+    if (ok) {
+      // 正解: 並べて次へ
+      card.classList.add('ok');
+      playSound('ok');
+      $('reveal').textContent = formatDate(current.dateStr);
+      history.push({ meme: current, ok: true });
+      latest = current;
+      placed.splice(index, 0, current);
+      render(index);   // 追加したカードに演出をつける
+      setTimeout(finishOrNext, OK_MS);
+    } else {
+      // 不正解: 並べずに破棄。正しい日付を見せて学習できるようにする
+      misses++;
+      history.push({ meme: current, ok: false });
+      card.classList.add('ng');
+      playSound('ng');
+      $('reveal').className = 'reveal ng';
+      $('reveal').textContent = '✖ 正解は ' + formatDate(current.dateStr);
+      // 本来入るはずだった位置(自分より新しいミームの手前)にゴーストを出す
+      const ghostAt = placed.filter(m => m.date <= current.date).length;
+      render(-1, ghostAt);
+      const g = document.querySelector('.ghost');
+      if (g) g.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      setTimeout(finishOrNext, FEEDBACK_MS);
+    }
+  }
+
+  // クリア判定 or 次のカードへ
+  function finishOrNext() {
+    const cleared = placed.length - 1 >= goal;   // 基準の1枚は数えない
+    // 山札が尽きた場合もそこで終了(ミームが足りないとき)
+    if (cleared || deck.length === 0) return finishGame();
+    nextCard();
+    locked = false;   // 先に解除してから描画する(スロットのdisabledに反映させるため)
+    render();
+  }
+
+  // ---------- ベスト記録 ----------
+  // 保存形式は {sec, misses}。壊れた値や旧形式の値(数値だけ)は「記録なし」として扱う
+  function loadBest() {
+    try {
+      const b = JSON.parse(localStorage.getItem(BEST_KEY));
+      if (b && Number.isFinite(b.sec) && Number.isFinite(b.misses)) return b;
+    } catch (e) {}
+    return null;
+  }
+  // a が b より良い記録か(ミスが少ない方が上、同じならタイムが短い方が上)
+  function isBetter(a, b) {
+    return a.misses < b.misses || (a.misses === b.misses && a.sec < b.sec);
+  }
+  function bestLabel(b) {
+    return 'ベスト: ' + b.sec + '秒 / ミス' + b.misses + '回';
+  }
+
+  // X / Bluesky の投稿画面を開くリンクを作る。ゲームオーバーのときはボタンごと隠す
+  function setupShare(cleared, sec) {
+    $('share').classList.toggle('hidden', !cleared);
+    if (!cleared) return;
+    const url = SHARE_URL || (location.origin + location.pathname);
+    // 投稿本文(\n は改行)
+    const text = 'インターネッタークロニクルをクリア!\n' +
+      'タイム ' + sec + '秒 / ミス ' + misses + '回\n' +
+      '#インターネッタークロニクル';
+    // X は本文とURLを別パラメータで渡す。Bluesky は本文にURLを含める(自動でリンクカードになる)
+    $('shareX').href = 'https://x.com/intent/post?text=' + encodeURIComponent(text) + '&url=' + encodeURIComponent(url);
+    $('shareBsky').href = 'https://bsky.app/intent/compose?text=' + encodeURIComponent(text + '\n' + url);
+  }
+
+  function finishGame() {
+    clearInterval(timerId);
+    const sec = Math.floor((performance.now() - startTime) / 1000);   // 表示と同じ整数秒で扱う
+    // 目標数を並べられたか(山札切れで終わった場合は false)
+    const cleared = placed.length - 1 >= goal;
+    $('rTitle').textContent = cleared ? 'クリア!' : 'ゲームオーバー';
+    if (cleared) playSound('clear');
+    setupShare(cleared, sec);
+
+    $('rTime').textContent = sec;
+    $('rMiss').textContent = misses;
+
+    // ベスト記録: ミスが少ない方が上、同じならタイムが短い方が上
+    const best = loadBest();
+    const now = { sec, misses };
+    let msg;
+    if (!cleared) {
+      // 目標数を並べられなかったときは記録の対象外にする
+      msg = best ? bestLabel(best) + '(今回は記録されません)' : '今回は記録されません';
+    } else if (!best || isBetter(now, best)) {
+      msg = '🎉 ベスト更新!';
+      try { localStorage.setItem(BEST_KEY, JSON.stringify(now)); } catch (e) {}   // localStorageが使えなくても落ちないように
+    } else {
+      msg = bestLabel(best);
+    }
+    $('rBest').textContent = msg;
+
+    // 並べたもの・間違えたものを日付順に一覧表示(ミスは赤)
+    const list = $('resultList');
+    list.textContent = '';
+    list.appendChild(axisLabel('▲ 古い'));
+    const sorted = history.slice().sort((x, y) => x.meme.date - y.meme.date);
+    for (const h of sorted) {
+      const el = placedCard(h.meme, false, false);
+      el.classList.add(h.ok ? 'hit' : 'miss');
+      const mark = document.createElement('span');
+      mark.className = 'mark';
+      mark.textContent = h.ok ? '✔' : '✖';
+      el.prepend(mark);
+      list.appendChild(el);
+    }
+    list.appendChild(axisLabel('▼ 新しい'));
+    show('result');
+  }
+
+  // ================= 描画 =================
+  function updateTimer() {
+    // 小数点以下は表示しない
+    $('timer').textContent = Math.floor((performance.now() - startTime) / 1000);
+  }
+  function updateHud() {
+    $('progress').textContent = placed.length - 1;
+    $('misses').textContent = misses;
+  }
+
+  // タイムラインを作り直す。
+  //   newIndex: 直前に追加したカードの位置(正解演出用)
+  //   ghostAt : 不正解時に「本来入るはずだった」スロットの位置(-1ならなし)
+  function render(newIndex = -1, ghostAt = -1) {
+    updateHint();
+    const tl = $('timeline');
+    tl.textContent = '';
+    tl.appendChild(axisLabel('▲ 古い'));
+    for (let i = 0; i <= placed.length; i++) {
+      if (i === ghostAt) {
+        // 本来の位置には、スロットの代わりに破棄されたミームを薄く表示する
+        tl.appendChild(placedCard(current, false, true));
+      } else {
+        // 置き場所(カードとカードの間・先頭・末尾)
+        const slot = document.createElement('button');
+        slot.className = 'slot';
+        slot.textContent = '＋ ここに置く';
+        slot.disabled = locked;
+        slot.addEventListener('click', () => onSlot(i));
+        tl.appendChild(slot);
+      }
+
+      if (i < placed.length) {
+        const card = placedCard(placed[i], i === newIndex);
+        if (placed[i] === latest) card.classList.add('latest');
+        tl.appendChild(card);
+      }
+    }
+    tl.appendChild(axisLabel('▼ 新しい'));
+    updateHud();
+  }
+
+  // 操作説明: 常に同じ文言を表示する
+  function updateHint() {
+    $('hint').textContent = '上ほど古く、下ほど新しい順。いつ頃か考えて、入る場所の「＋ここに置く」をタップ(間違えると破棄されます)';
+  }
+
+  function axisLabel(text) {
+    const el = document.createElement('div');
+    el.className = 'axis';
+    el.textContent = text;
+    return el;
+  }
+
+  // 日付・タイトル・出典リンクを1行にまとめたカード
+  function placedCard(m, isNew, isGhost) {
+    const el = document.createElement('div');
+    el.className = 'placed' + (isNew ? ' new' : '') + (isGhost ? ' ghost' : '');
+    const d = document.createElement('div');
+    d.className = 'date'; d.textContent = formatDate(m.dateStr);
+    const t = document.createElement('div');
+    t.className = 'title'; t.textContent = m.title;
+    el.append(d, t);
+    // ソースURLがあればリンクを付ける(http(s)のみ許可)
+    if (/^https?:\/\//.test(m.src)) {
+      const a = document.createElement('a');
+      a.href = m.src; a.target = '_blank'; a.rel = 'noopener'; a.textContent = '出典 ↗';
+      el.appendChild(a);
+    }
+    return el;
+  }
+
+  // 画面切り替え
+  function show(name) {
+    for (const id of ['title', 'game', 'result']) $(id).classList.toggle('hidden', id !== name);
+    window.scrollTo(0, 0);
+  }
+
+  // ================= 初期化 =================
+  async function init() {
+    $('goalText').textContent = GOAL;
+    try {
+      const best = loadBest();
+      if (best) $('bestText').textContent = bestLabel(best);
+    } catch (e) {}
+
+    try {
+      const res = await fetch(TSV_PATH, { cache: 'no-cache' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      allMemes = parseTsv(await res.text());
+      if (allMemes.length < 2) throw new Error('日付つきのミームが足りません');
+      $('startBtn').disabled = false;
+      $('startBtn').textContent = 'スタート';
+    } catch (e) {
+      // file:// で直接開くと fetch が失敗するので、その旨を表示
+      $('startBtn').textContent = '読み込み失敗';
+      const err = $('errorMsg');
+      err.classList.remove('hidden');
+      err.textContent = 'meme.tsv を読み込めませんでした(' + e.message + ')。' +
+        'ローカルではWebサーバー経由で開いてください。';
+    }
+  }
+
+  // 効果音トグル: 前回の設定を復元し、変更したら保存する(localStorageが使えなくても動く)
+  try { soundOn = localStorage.getItem(SOUND_KEY) !== 'off'; } catch (e) {}
+  $('soundToggle').checked = soundOn;
+  $('soundToggle').addEventListener('change', e => {
+    soundOn = e.target.checked;
+    try { localStorage.setItem(SOUND_KEY, soundOn ? 'on' : 'off'); } catch (err) {}
+    if (soundOn) { unlockAudio(); playSound('ok'); }   // オンにした瞬間に試し鳴りさせる
+  });
+
+  $('startBtn').addEventListener('click', startGame);
+  $('retryBtn').addEventListener('click', startGame);
+  init();
+})();
+</script>
+</body>
+</html>
