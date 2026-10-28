@@ -135,6 +135,9 @@
   }
   .placed .date { color: var(--accent-text); font-size: 12px; font-weight: 700; white-space: nowrap; }
   .placed .title { font-size: 14px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* ノーマル: 年だけ強調し、月日は細く薄くする */
+  .y { font-weight: 700; }
+  .md { font-weight: 400; opacity: .55; }
   .placed a { color: var(--sub); font-size: 12px; text-decoration: none; white-space: nowrap; }
   .placed.new { animation: pop .5s ease; }
   /* 直前に置いたカード: 次に置くまで濃い色のままにして、どこに入ったか分かるようにする */
@@ -193,6 +196,13 @@
     <span class="track"><span class="knob"></span></span>
     <span>効果音</span>
   </label>
+  <!-- オフ=ノーマル(年だけで判定) / オン=ハード(年月日で判定) -->
+  <label class="toggle">
+    <input type="checkbox" id="hardToggle">
+    <span class="track"><span class="knob"></span></span>
+    <span>ハードモード</span>
+  </label>
+  <p id="modeNote" class="score"></p>
   <button id="startBtn" class="btn" disabled>読み込み中…</button>
   <p id="bestText" class="score"></p>
 </section>
@@ -217,6 +227,7 @@
   <h1 id="rTitle">クリア!</h1>
   <div class="result-row">タイム <b id="rTime"></b> 秒</div>
   <div class="result-row">ミス <b id="rMiss"></b> 回</div>
+  <div class="result-row" id="rMode"></div>
   <div class="score" id="rBest"></div>
   <button id="retryBtn" class="btn">もう一回</button>
   <!-- クリアしたときだけ表示。リンクは finishGame で組み立てる -->
@@ -248,6 +259,14 @@
   const OK_MS = 500;             // 正解時の演出時間
   const BEST_KEY = 'internetter-chronicle.best';
   const SOUND_KEY = 'internetter-chronicle.sound';
+  const MODE_KEY = 'internetter-chronicle.mode';   // 'normal' / 'hard'
+  // 難易度ごとのベスト記録の保存先(ハードは従来のキーをそのまま使う)
+  const BEST_KEYS = { normal: BEST_KEY + '.normal', hard: BEST_KEY };
+  const MODE_NAMES = { normal: 'ノーマル', hard: 'ハード' };
+  const MODE_NOTES = {
+    normal: 'ノーマルモード: 年だけで正誤判定します',
+    hard: 'ハードモード: 年月日で正誤判定します',
+  };
   // 共有するゲームのURL。空なら今開いているページのURLを使う(公開後に固定したいときだけ設定)
   const SHARE_URL = '';
 
@@ -263,6 +282,8 @@
   let locked = false;  // 判定演出中は入力を受け付けない
   let latest = null;   // 直前に正しく置いたミーム(濃く表示する)
   let history = [];    // 結果一覧用: 出題したミームと正誤 {meme, ok}
+  let mode = 'normal';     // タイトル画面で選択中の難易度
+  let playMode = 'normal'; // いまプレイ中の難易度(開始時に固定する)
 
   const $ = id => document.getElementById(id);
 
@@ -296,6 +317,20 @@
   function formatDate(s) {
     const y = Number(s.slice(0, 4)), m = Number(s.slice(4, 6)), d = Number(s.slice(6, 8));
     return y + '年' + (m ? m + '月' : '') + (m && d ? d + '日' : '');
+  }
+
+  // 日付を el に表示する。ノーマルでは判定に使う「年」だけを強調し、月日は薄く細くする。
+  // prefix は日付の前に付ける文字(「✖ 正解は 」など)
+  function fillDate(el, s, prefix = '') {
+    const full = formatDate(s);
+    el.textContent = prefix;
+    if (playMode !== 'normal') { el.append(full); return; }
+    const i = full.indexOf('年') + 1;   // 「2000年」までが年の部分
+    const y = document.createElement('span');
+    y.className = 'y'; y.textContent = full.slice(0, i);
+    const md = document.createElement('span');
+    md.className = 'md'; md.textContent = full.slice(i);
+    el.append(y, md);
   }
 
   // Fisher-Yates シャッフル
@@ -362,6 +397,7 @@
   function startGame() {
     unlockAudio();   // ボタン操作の中で呼ぶ必要がある
     playSound('ok'); // 開始の合図に、正解と同じ音を鳴らす
+    playMode = mode; // プレイ中に難易度が変わらないよう、開始時の設定を固定する
     // 最初の1枚(基準)+ 並べる分が必要。ミームが少ないときはゴールを減らす
     goal = Math.min(GOAL, allMemes.length - 1);
     deck = shuffle(allMemes);
@@ -393,12 +429,18 @@
     $('reveal').className = 'reveal';
   }
 
+  // 比較に使う値。ハードは年月日(YYYYMMDD)、ノーマルは年(YYYY)だけを見る
+  function dateKey(m) {
+    return playMode === 'normal' ? Math.floor(m.date / 10000) : m.date;
+  }
+
   // スロット index に置けるか判定する。
-  // 左隣 <= 正解日 <= 右隣 であれば正解(同日のミームは前後どちらでもOK)
+  // 左隣 <= 正解 <= 右隣 であれば正解(比較値が同じミームは前後どちらでもOK。
+  // ノーマルでは同じ年なら前後どちらでも正解になる)
   function isCorrect(index) {
     const left = placed[index - 1], right = placed[index];
-    return (!left || left.date <= current.date) &&
-           (!right || current.date <= right.date);
+    return (!left || dateKey(left) <= dateKey(current)) &&
+           (!right || dateKey(current) <= dateKey(right));
   }
 
   function onSlot(index) {
@@ -411,7 +453,7 @@
       // 正解: 並べて次へ
       card.classList.add('ok');
       playSound('ok');
-      $('reveal').textContent = formatDate(current.dateStr);
+      fillDate($('reveal'), current.dateStr);
       history.push({ meme: current, ok: true });
       latest = current;
       placed.splice(index, 0, current);
@@ -424,8 +466,9 @@
       card.classList.add('ng');
       playSound('ng');
       $('reveal').className = 'reveal ng';
-      $('reveal').textContent = '✖ 正解は ' + formatDate(current.dateStr);
+      fillDate($('reveal'), current.dateStr, '✖ 正解は ');
       // 本来入るはずだった位置(自分より新しいミームの手前)にゴーストを出す
+      // (表示位置は難易度に関係なく、常に年月日で決める)
       const ghostAt = placed.filter(m => m.date <= current.date).length;
       render(-1, ghostAt);
       const g = document.querySelector('.ghost');
@@ -446,9 +489,10 @@
 
   // ---------- ベスト記録 ----------
   // 保存形式は {sec, misses}。壊れた値や旧形式の値(数値だけ)は「記録なし」として扱う
-  function loadBest() {
+  // 難易度ごとに別々に記録する。m は 'normal' / 'hard'
+  function loadBest(m) {
     try {
-      const b = JSON.parse(localStorage.getItem(BEST_KEY));
+      const b = JSON.parse(localStorage.getItem(BEST_KEYS[m]));
       if (b && Number.isFinite(b.sec) && Number.isFinite(b.misses)) return b;
     } catch (e) {}
     return null;
@@ -458,7 +502,8 @@
     return a.misses < b.misses || (a.misses === b.misses && a.sec < b.sec);
   }
   function bestLabel(b) {
-    return 'ベスト: ' + b.sec + '秒 / ミス' + b.misses + '回';
+    // 記録がないとき(b が null)は「--」で表示する
+    return 'ベストスコア: ' + (b ? b.sec : '--') + '秒 / ミス' + (b ? b.misses : '--') + '回';
   }
 
   // X / Bluesky の投稿画面を開くリンクを作る。ゲームオーバーのときはボタンごと隠す
@@ -467,8 +512,8 @@
     if (!cleared) return;
     const url = SHARE_URL || (location.origin + location.pathname);
     // 投稿本文(\n は改行)
-    const text = 'インターネッタークロニクルをクリア!\n' +
-      'タイム ' + sec + '秒 / ミス ' + misses + '回\n' +
+    const text = 'インターネッタークロニクルをクリア！\n' +
+      'タイム ' + sec + '秒 / ミス ' + misses + '回 / ' + MODE_NAMES[playMode] + 'モード\n' +
       '#インターネッタークロニクル';
     // X は本文とURLを別パラメータで渡す。Bluesky は本文にURLを含める(自動でリンクカードになる)
     $('shareX').href = 'https://x.com/intent/post?text=' + encodeURIComponent(text) + '&url=' + encodeURIComponent(url);
@@ -480,7 +525,8 @@
     const sec = Math.floor((performance.now() - startTime) / 1000);   // 表示と同じ整数秒で扱う
     // 目標数を並べられたか(山札切れで終わった場合は false)
     const cleared = placed.length - 1 >= goal;
-    $('rTitle').textContent = cleared ? 'クリア!' : 'ゲームオーバー';
+    $('rTitle').textContent = cleared ? 'クリア！' : 'ゲームオーバー';
+    $('rMode').textContent = MODE_NAMES[playMode] + 'モード';   // タイム・ミスの下に難易度を表示
     if (cleared) playSound('clear');
     setupShare(cleared, sec);
 
@@ -488,15 +534,15 @@
     $('rMiss').textContent = misses;
 
     // ベスト記録: ミスが少ない方が上、同じならタイムが短い方が上
-    const best = loadBest();
+    const best = loadBest(playMode);   // プレイした難易度の記録と比べる
     const now = { sec, misses };
     let msg;
     if (!cleared) {
       // 目標数を並べられなかったときは記録の対象外にする
-      msg = best ? bestLabel(best) + '(今回は記録されません)' : '今回は記録されません';
+      msg = bestLabel(best) + '(今回は記録されません)';
     } else if (!best || isBetter(now, best)) {
       msg = '🎉 ベスト更新!';
-      try { localStorage.setItem(BEST_KEY, JSON.stringify(now)); } catch (e) {}   // localStorageが使えなくても落ちないように
+      try { localStorage.setItem(BEST_KEYS[playMode], JSON.stringify(now)); } catch (e) {}   // localStorageが使えなくても落ちないように
     } else {
       msg = bestLabel(best);
     }
@@ -506,7 +552,7 @@
     const list = $('resultList');
     list.textContent = '';
     list.appendChild(axisLabel('▲ 古い'));
-    const sorted = history.slice().sort((x, y) => x.meme.date - y.meme.date);
+    const sorted = history.slice().sort((x, y) => x.meme.date - y.meme.date);   // 一覧は難易度に関わらず年月日順
     for (const h of sorted) {
       const el = placedCard(h.meme, false, false);
       el.classList.add(h.ok ? 'hit' : 'miss');
@@ -579,7 +625,7 @@
     const el = document.createElement('div');
     el.className = 'placed' + (isNew ? ' new' : '') + (isGhost ? ' ghost' : '');
     const d = document.createElement('div');
-    d.className = 'date'; d.textContent = formatDate(m.dateStr);
+    d.className = 'date'; fillDate(d, m.dateStr);
     const t = document.createElement('div');
     t.className = 'title'; t.textContent = m.title;
     el.append(d, t);
@@ -601,10 +647,7 @@
   // ================= 初期化 =================
   async function init() {
     $('goalText').textContent = GOAL;
-    try {
-      const best = loadBest();
-      if (best) $('bestText').textContent = bestLabel(best);
-    } catch (e) {}
+    updateModeView();
 
     try {
       const res = await fetch(TSV_PATH, { cache: 'no-cache' });
@@ -630,6 +673,22 @@
     soundOn = e.target.checked;
     try { localStorage.setItem(SOUND_KEY, soundOn ? 'on' : 'off'); } catch (err) {}
     if (soundOn) { unlockAudio(); playSound('ok'); }   // オンにした瞬間に試し鳴りさせる
+  });
+
+  // タイトル画面の表示を、選択中の難易度に合わせる(説明文と、その難易度のベスト記録)
+  function updateModeView() {
+    $('modeNote').textContent = MODE_NOTES[mode];
+    const best = loadBest(mode);
+    $('bestText').textContent = bestLabel(best);   // 記録がなければ「--」表示
+  }
+
+  // 難易度トグル: 前回の設定を復元し、変更したら保存して表示を切り替える
+  try { mode = localStorage.getItem(MODE_KEY) === 'hard' ? 'hard' : 'normal'; } catch (e) {}
+  $('hardToggle').checked = mode === 'hard';
+  $('hardToggle').addEventListener('change', e => {
+    mode = e.target.checked ? 'hard' : 'normal';
+    try { localStorage.setItem(MODE_KEY, mode); } catch (err) {}
+    updateModeView();
   });
 
   $('startBtn').addEventListener('click', startGame);
