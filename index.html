@@ -48,6 +48,11 @@
     background: var(--accent); color: #222; font-weight: 700;
     padding: 14px 32px; border-radius: 999px; font-size: 18px;
   }
+  /* 目立たせない副ボタン(モードを変更する) */
+  .btn-sub {
+    background: transparent; color: var(--accent-text); font-weight: 700;
+    padding: 10px 24px; border-radius: 999px; font-size: 15px; border: 2px solid var(--accent);
+  }
 
   /* ---------- タイトル / 結果画面 ---------- */
   .screen {
@@ -64,9 +69,9 @@
     overflow-wrap: anywhere;
   }
   /* 効果音のトグルスイッチ */
-  .toggle { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 15px; color: var(--text); user-select: none; }
+  .toggle { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 15px; color: var(--text); user-select: none; max-width: 100%; text-align: left; }
   .toggle input { position: absolute; opacity: 0; width: 0; height: 0; }   /* 見た目は .track で作る(キーボード操作は維持) */
-  .toggle .track { position: relative; width: 44px; height: 26px; border-radius: 999px; background: #c5cad8; transition: background .2s; }
+  .toggle .track { position: relative; flex: none; width: 44px; height: 26px; border-radius: 999px; background: #c5cad8; transition: background .2s; }
   .toggle .knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0004; transition: transform .2s; }
   .toggle input:checked + .track { background: var(--accent); }
   .toggle input:checked + .track .knob { transform: translateX(18px); }
@@ -164,6 +169,29 @@
   .results .mark { font-weight: 700; }
   .legend { font-size: 12px; color: var(--sub); }
 
+  /* ---------- タイムラインモード ---------- */
+  #tlGame { display: flex; flex-direction: column; flex: 1 0 auto; }
+  .hud .btn-done {
+    border: 0; border-radius: 999px; padding: 4px 22px; background: var(--accent); color: #222;
+    font-weight: 700; font-size: 15px; cursor: pointer;
+  }
+  .tl-hint { margin: 0; padding: 12px 16px 0; font-size: 12px; line-height: 1.5; color: var(--sub); text-align: center; }
+  /* 並べ替え中のカード: 日付は伏せ、タイトルは折り返して全文を見せる。
+     カード上は touch-action: none でドラッグ専用にする。ページのスクロールは、
+     左右の余白とカード間の隙間(下の #tlList)に指を置いて行う */
+  #tlList { gap: 12px; padding: 4px 36px 40px; }
+  .placed.tlcard { cursor: grab; padding: 14px 12px; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .placed.tlcard .title { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; font-size: 15px; }
+  .tlcard.dragging { position: relative; z-index: 20; cursor: grabbing; box-shadow: 0 6px 18px #0004; background: var(--accent); }
+  /* 落とす位置の目印(影なのでレイアウトは動かない) */
+  .tlcard.drop-before { box-shadow: 0 -4px 0 0 var(--accent-text); }
+  .tlcard.drop-after { box-shadow: 0 4px 0 0 var(--accent-text); }
+  /* ずれたカードの減点(薄く) */
+  .results .placed .minus { flex: none; font-size: 12px; color: var(--ng); opacity: .6; white-space: nowrap; }
+  .legend-inline { font-size: 12px; font-weight: 400; color: var(--sub); }
+  /* 結果一覧の見出し */
+  .list-title { margin-top: 10px; text-align: center; font-size: 15px; font-weight: 700; }
+
   /* ---------- フッター ---------- */
   .site-footer {
     flex: none; display: flex; justify-content: center; align-items: center; gap: 14px;
@@ -188,21 +216,26 @@
 <!-- ===== タイトル画面 ===== -->
 <section id="title" class="screen">
   <h1 class="app-title">インターネッター<wbr>クロニクル</h1>
-  <p>表示される出来事を、正しい順番で並べよう<br>
-     <span id="goalText">10</span>個並べるまでのタイムとミスの少なさを競います</p>
+  <p>ネットの出来事を、正しい順番で並べよう</p>
   <p id="errorMsg" class="hidden"></p>
+  <!-- 並び順: ゲーム種類 → 難易度 → 効果音。ラベルの文言は状態に応じてJSで切り替える -->
+  <!-- オフ=クイズ(1つずつ置いていく) / オン=タイムライン(10個をまとめて並べ替える) -->
   <label class="toggle">
-    <input type="checkbox" id="soundToggle" checked>
+    <input type="checkbox" id="typeToggle">
     <span class="track"><span class="knob"></span></span>
-    <span>効果音</span>
+    <span id="typeText"></span>
   </label>
   <!-- オフ=ノーマル(年だけで判定) / オン=ハード(年月日で判定) -->
   <label class="toggle">
     <input type="checkbox" id="hardToggle">
     <span class="track"><span class="knob"></span></span>
-    <span>ハードモード</span>
+    <span id="modeText"></span>
   </label>
-  <p id="modeNote" class="score"></p>
+  <label class="toggle">
+    <input type="checkbox" id="soundToggle" checked>
+    <span class="track"><span class="knob"></span></span>
+    <span id="soundText"></span>
+  </label>
   <button id="startBtn" class="btn" disabled>読み込み中…</button>
   <p id="bestText" class="score"></p>
 </section>
@@ -222,20 +255,31 @@
   <div id="timeline" class="timeline"></div>
 </main>
 
+<!-- ===== ゲーム画面(タイムラインモード) ===== -->
+<main id="tlGame" class="hidden">
+  <div class="hud">
+    <span>⏱ <b id="tlTimer">0</b>s</span>
+    <button id="tlDone" class="btn-done">完成</button>
+  </div>
+  <p class="tl-hint">カードをドラッグして並べ替え。上ほど古く、下ほど新しい順にして「完成」を押そう</p>
+  <div id="tlList" class="timeline"></div>
+</main>
+
 <!-- ===== 結果画面 ===== -->
 <section id="result" class="screen hidden">
   <h1 id="rTitle">クリア!</h1>
   <div class="result-row">タイム <b id="rTime"></b> 秒</div>
-  <div class="result-row">ミス <b id="rMiss"></b> 回</div>
+  <div class="result-row"><span id="rLabel2">ミス</span> <b id="rMiss"></b> <span id="rUnit2">回</span></div>
   <div class="result-row" id="rMode"></div>
   <div class="score" id="rBest"></div>
-  <button id="retryBtn" class="btn">もう一回</button>
+  <button id="retryBtn" class="btn">同じモードで遊ぶ</button>
+  <button id="menuBtn" class="btn-sub">モードを変更する</button>
   <!-- クリアしたときだけ表示。リンクは finishGame で組み立てる -->
   <div id="share" class="share hidden">
     <a id="shareX" class="btn-share x" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x"/></svg>Xに投稿</a>
     <a id="shareBsky" class="btn-share bsky" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bsky"/></svg>Blueskyに投稿</a>
   </div>
-  <div class="legend">日付順の一覧(<span style="color:var(--ok)">緑＝正解</span> / <span style="color:var(--ng)">赤＝ミスで破棄</span>)</div>
+  <div class="legend" id="legendQuiz">日付順の一覧(<span style="color:var(--ok)">緑＝正解</span> / <span style="color:var(--ng)">赤＝ミスで破棄</span>)</div>
   <div id="resultList" class="results"></div>
 </section>
 
@@ -260,13 +304,25 @@
   const BEST_KEY = 'internetter-chronicle.best';
   const SOUND_KEY = 'internetter-chronicle.sound';
   const MODE_KEY = 'internetter-chronicle.mode';   // 'normal' / 'hard'
-  // 難易度ごとのベスト記録の保存先(ハードは従来のキーをそのまま使う)
-  const BEST_KEYS = { normal: BEST_KEY + '.normal', hard: BEST_KEY };
+  const TYPE_KEY = 'internetter-chronicle.type';   // 'quiz' / 'timeline'
+  // ゲーム種類×難易度ごとのベスト記録の保存先(クイズのハードは従来のキーをそのまま使う)
+  const BEST_KEYS = {
+    quiz: { normal: BEST_KEY + '.normal', hard: BEST_KEY },
+    timeline: { normal: BEST_KEY + '.timeline.normal', hard: BEST_KEY + '.timeline.hard' },
+  };
+  const TYPE_NAMES = { quiz: 'クイズ', timeline: 'タイムライン' };
+  // トグルのラベル(状態ごとの説明つき)
+  const TYPE_NOTES = {
+    quiz: 'クイズモード：順番に表示される出来事を正しい位置に置いていきます',
+    timeline: 'タイムラインモード：10個の出来事を正しい時系列に並べ替えます',
+  };
   const MODE_NAMES = { normal: 'ノーマル', hard: 'ハード' };
   const MODE_NOTES = {
-    normal: 'ノーマルモード: 年だけで正誤判定します',
-    hard: 'ハードモード: 年月日で正誤判定します',
+    normal: 'ノーマルモード：年だけで正誤判定します',
+    hard: 'ハードモード：年月日で正誤判定します',
   };
+  // 結果や投稿文に出す「どのモードで遊んだか」(例: クイズ・ノーマルモード)
+  const modeLabel = (type, m) => TYPE_NAMES[type] + '・' + MODE_NAMES[m] + 'モード';
   // 共有するゲームのURL。空なら今開いているページのURLを使う(公開後に固定したいときだけ設定)
   const SHARE_URL = '';
 
@@ -284,6 +340,9 @@
   let history = [];    // 結果一覧用: 出題したミームと正誤 {meme, ok}
   let mode = 'normal';     // タイトル画面で選択中の難易度
   let playMode = 'normal'; // いまプレイ中の難易度(開始時に固定する)
+  let gameType = 'quiz';   // タイトル画面で選択中のゲーム種類 'quiz' / 'timeline'
+  let playType = 'quiz';   // いまプレイ中のゲーム種類(開始時に固定する)
+  let tlItems = [];        // タイムラインモード: いまの並び順
 
   const $ = id => document.getElementById(id);
 
@@ -397,7 +456,15 @@
   function startGame() {
     unlockAudio();   // ボタン操作の中で呼ぶ必要がある
     playSound('ok'); // 開始の合図に、正解と同じ音を鳴らす
-    playMode = mode; // プレイ中に難易度が変わらないよう、開始時の設定を固定する
+    // プレイ中に設定が変わらないよう、開始時のゲーム種類と難易度を固定する
+    playMode = mode;
+    playType = gameType;
+    clearInterval(timerId);
+    if (playType === 'timeline') startTimeline(); else startQuiz();
+  }
+
+  // クイズモード開始
+  function startQuiz() {
     // 最初の1枚(基準)+ 並べる分が必要。ミームが少ないときはゴールを減らす
     goal = Math.min(GOAL, allMemes.length - 1);
     deck = shuffle(allMemes);
@@ -488,32 +555,50 @@
   }
 
   // ---------- ベスト記録 ----------
-  // 保存形式は {sec, misses}。壊れた値や旧形式の値(数値だけ)は「記録なし」として扱う
-  // 難易度ごとに別々に記録する。m は 'normal' / 'hard'
-  function loadBest(m) {
+  // 保存形式は クイズ {sec, misses} / タイムライン {sec, score}。
+  // 壊れた値や旧形式の値(数値だけ)は「記録なし」として扱う。
+  // ゲーム種類(type)と難易度(m)ごとに別々に記録する
+  function loadBest(type, m) {
     try {
-      const b = JSON.parse(localStorage.getItem(BEST_KEYS[m]));
-      if (b && Number.isFinite(b.sec) && Number.isFinite(b.misses)) return b;
+      const b = JSON.parse(localStorage.getItem(BEST_KEYS[type][m]));
+      const field = type === 'timeline' ? 'score' : 'misses';
+      if (b && Number.isFinite(b.sec) && Number.isFinite(b[field])) return b;
     } catch (e) {}
     return null;
   }
-  // a が b より良い記録か(ミスが少ない方が上、同じならタイムが短い方が上)
-  function isBetter(a, b) {
+  // a が b より良い記録か
+  //   クイズ: ミスが少ない方が上、同じならタイムが短い方が上
+  //   タイムライン: スコアが高い方が上、同じならタイムが短い方が上
+  function isBetter(a, b, type) {
+    if (type === 'timeline') return a.score > b.score || (a.score === b.score && a.sec < b.sec);
     return a.misses < b.misses || (a.misses === b.misses && a.sec < b.sec);
   }
-  function bestLabel(b) {
+  function bestLabel(b, type) {
     // 記録がないとき(b が null)は「--」で表示する
+    if (type === 'timeline') return 'ベストスコア: ' + (b ? b.score : '--') + '点 / ' + (b ? b.sec : '--') + '秒';
     return 'ベストスコア: ' + (b ? b.sec : '--') + '秒 / ミス' + (b ? b.misses : '--') + '回';
   }
+  // 今回の結果 now をベストと比べ、必要なら保存して、表示する文言を返す。
+  // cleared が false のとき(クイズのゲームオーバー)は記録の対象外
+  function judgeBest(now, cleared) {
+    const best = loadBest(playType, playMode);
+    if (!cleared) return bestLabel(best, playType) + '(今回は記録されません)';
+    if (!best || isBetter(now, best, playType)) {
+      // localStorageが使えなくても落ちないように
+      try { localStorage.setItem(BEST_KEYS[playType][playMode], JSON.stringify(now)); } catch (e) {}
+      return '🎉 ベスト更新!';
+    }
+    return bestLabel(best, playType);
+  }
 
-  // X / Bluesky の投稿画面を開くリンクを作る。ゲームオーバーのときはボタンごと隠す
-  function setupShare(cleared, sec) {
+  // X / Bluesky の投稿画面を開くリンクを作る。クリアしていないときはボタンごと隠す
+  //   headline: 1行目(「…をクリア！」など) / stats: 2行目(タイム・ミス/スコア・モード)
+  function setupShare(cleared, headline, stats) {
     $('share').classList.toggle('hidden', !cleared);
     if (!cleared) return;
     const url = SHARE_URL || (location.origin + location.pathname);
     // 投稿本文(\n は改行)
-    const text = 'インターネッタークロニクルをクリア！\n' +
-      'タイム ' + sec + '秒 / ミス ' + misses + '回 / ' + MODE_NAMES[playMode] + 'モード\n' +
+    const text = headline + '\n' + stats + '\n' +
       '#インターネッタークロニクル';
     // X は本文とURLを別パラメータで渡す。Bluesky は本文にURLを含める(自動でリンクカードになる)
     $('shareX').href = 'https://x.com/intent/post?text=' + encodeURIComponent(text) + '&url=' + encodeURIComponent(url);
@@ -526,27 +611,20 @@
     // 目標数を並べられたか(山札切れで終わった場合は false)
     const cleared = placed.length - 1 >= goal;
     $('rTitle').textContent = cleared ? 'クリア！' : 'ゲームオーバー';
-    $('rMode').textContent = MODE_NAMES[playMode] + 'モード';   // タイム・ミスの下に難易度を表示
+    const label = modeLabel(playType, playMode);
+    $('rMode').textContent = label;   // タイム・ミスの下にモードを表示
     if (cleared) playSound('clear');
-    setupShare(cleared, sec);
+    setupShare(cleared, 'インターネッタークロニクルをクリア！',
+      'タイム ' + sec + '秒 / ミス ' + misses + '回 / ' + label);
 
     $('rTime').textContent = sec;
+    $('rLabel2').textContent = 'ミス';
     $('rMiss').textContent = misses;
+    $('rUnit2').textContent = '回';
+    $('legendQuiz').classList.remove('hidden');
 
-    // ベスト記録: ミスが少ない方が上、同じならタイムが短い方が上
-    const best = loadBest(playMode);   // プレイした難易度の記録と比べる
-    const now = { sec, misses };
-    let msg;
-    if (!cleared) {
-      // 目標数を並べられなかったときは記録の対象外にする
-      msg = bestLabel(best) + '(今回は記録されません)';
-    } else if (!best || isBetter(now, best)) {
-      msg = '🎉 ベスト更新!';
-      try { localStorage.setItem(BEST_KEYS[playMode], JSON.stringify(now)); } catch (e) {}   // localStorageが使えなくても落ちないように
-    } else {
-      msg = bestLabel(best);
-    }
-    $('rBest').textContent = msg;
+    // ベスト記録(目標数を並べられなかったときは記録の対象外)
+    $('rBest').textContent = judgeBest({ sec, misses }, cleared);
 
     // 並べたもの・間違えたものを日付順に一覧表示(ミスは赤)
     const list = $('resultList');
@@ -566,10 +644,176 @@
     show('result');
   }
 
+  // ================= タイムラインモード =================
+  // items[i] が置かれた位置 i について、正しい位置の範囲 lo..hi と、そこからのずれ d を返す。
+  // 比較値(dateKey)が同じカードは前後どちらでも正解なので、正しい位置は幅を持つ
+  function tlRange(items, i) {
+    const k = dateKey(items[i]);
+    const lo = items.filter(m => dateKey(m) < k).length;
+    const hi = items.filter(m => dateKey(m) <= k).length - 1;
+    const d = i < lo ? lo - i : (i > hi ? i - hi : 0);
+    return { lo, hi, d };
+  }
+  // 全カードのずれの合計
+  function tlPenalty(items) {
+    return items.reduce((sum, _, i) => sum + tlRange(items, i).d, 0);
+  }
+  // スコア: 100点から、ずれの合計(1つずれるごとに1点)を引く。
+  // 10枚が完全に逆順(ずれの合計が最大 = 50)のとき最低の50点になる
+  function tlScore(items) {
+    return Math.max(0, 100 - tlPenalty(items));
+  }
+
+  function startTimeline() {
+    const n = Math.min(GOAL, allMemes.length);
+    const picked = shuffle(allMemes).slice(0, n);
+    // 最初から正しい並びだと遊びにならないので、そうなったらシャッフルし直す(念のため回数に上限)
+    tlItems = shuffle(picked);
+    for (let t = 0; t < 20 && tlPenalty(tlItems) === 0; t++) tlItems = shuffle(picked);
+    show('tlGame');
+    renderTimeline();
+    startTime = performance.now();
+    timerId = setInterval(updateTimer, 250);
+    updateTimer();
+  }
+
+  // 並べ替え画面を描く。カードはドラッグで動かす(movedTo: 直前に動かしたカードの位置)
+  function renderTimeline(movedTo = -1) {
+    const tl = $('tlList');
+    tl.textContent = '';
+    tl.appendChild(axisLabel('▲ 古い'));
+    let movedEl = null;
+    tlItems.forEach((m, i) => {
+      const card = document.createElement('div');
+      card.className = 'placed tlcard';
+      const t = document.createElement('div');
+      t.className = 'title'; t.textContent = m.title;
+      card.appendChild(t);
+      attachDrag(card, i);
+      tl.appendChild(card);
+      if (i === movedTo) movedEl = card;
+    });
+    tl.appendChild(axisLabel('▼ 新しい'));
+    // 移したカードが画面外に行かないように見える位置へ寄せる
+    if (movedEl) movedEl.scrollIntoView({ block: 'nearest' });
+  }
+
+  // from 番目のカードを、抜いたあとの並びの to 番目へ移す
+  function moveCard(from, to) {
+    const [m] = tlItems.splice(from, 1);
+    tlItems.splice(to, 0, m);
+    renderTimeline(to);
+  }
+
+  // ---------- ドラッグ&ドロップ ----------
+  // Pointer Events でマウス・タッチ・ペンをまとめて扱う。
+  // カード上は touch-action: none(CSS)でドラッグ専用にし、ページのスクロールは
+  // カードの左右の余白・カード間の隙間から行う。
+  // ドラッグ中は DOM を組み替えず、カードを transform で指に追従させ、
+  // 落とす位置は「他のカードの中心より上にあるカードの数」で決める。
+  function attachDrag(card, idx) {
+    card.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      const startY = e.clientY, startScroll = window.scrollY;
+      const others = [...$('tlList').querySelectorAll('.tlcard')].filter(c => c !== card);
+      let lastY = startY, target = idx, raf = 0;
+      card.setPointerCapture(e.pointerId);
+      card.classList.add('dragging');
+
+      // カードの追従と、落とす位置(target)の更新
+      function update() {
+        card.style.transform = 'translateY(' + (lastY - startY + window.scrollY - startScroll) + 'px)';
+        target = others.filter(o => {
+          const r = o.getBoundingClientRect();
+          return r.top + r.height / 2 < lastY;
+        }).length;
+        others.forEach(o => o.classList.remove('drop-before', 'drop-after'));
+        if (target < others.length) others[target].classList.add('drop-before');
+        else others[others.length - 1].classList.add('drop-after');
+      }
+      // 画面の上端・下端に寄せたら、ページを自動スクロールする
+      function tick() {
+        const vh = window.innerHeight, top = 90, bottom = vh - 70;
+        if (lastY < top) window.scrollBy(0, -Math.min(20, (top - lastY) / 3 + 2));
+        else if (lastY > bottom) window.scrollBy(0, Math.min(20, (lastY - bottom) / 3 + 2));
+        update();
+        raf = requestAnimationFrame(tick);
+      }
+      function onMove(ev) { lastY = ev.clientY; }
+      function onEnd(ev) {
+        card.removeEventListener('pointermove', onMove);
+        card.removeEventListener('pointerup', onEnd);
+        card.removeEventListener('pointercancel', onEnd);
+        cancelAnimationFrame(raf);
+        if (ev.type === 'pointercancel' || target === idx) renderTimeline();   // 元の位置に戻す
+        else moveCard(idx, target);
+      }
+      card.addEventListener('pointermove', onMove);
+      card.addEventListener('pointerup', onEnd);
+      card.addEventListener('pointercancel', onEnd);
+      raf = requestAnimationFrame(tick);
+    });
+  }
+
+  // 「完成」ボタン: 採点して結果画面へ
+  function finishTimeline() {
+    clearInterval(timerId);
+    const sec = Math.floor((performance.now() - startTime) / 1000);
+    const score = tlScore(tlItems);
+    const label = modeLabel(playType, playMode);
+
+    $('rTitle').textContent = '完成！';
+    $('rMode').textContent = label;
+    $('rTime').textContent = sec;
+    $('rLabel2').textContent = 'スコア';
+    $('rMiss').textContent = score;
+    $('rUnit2').textContent = '点';
+    $('legendQuiz').classList.add('hidden');   // タイムラインの凡例は一覧の見出しに含める
+    playSound('clear');
+    setupShare(true, 'インターネッタークロニクルを完成！',
+      'タイム ' + sec + '秒 / スコア ' + score + '点 / ' + label);
+    $('rBest').textContent = judgeBest({ sec, score }, true);
+
+    // 自分の並べた順(正しい位置なら緑、ずれていれば赤)の下に、正しい順のタイムラインを並べて見せる
+    const list = $('resultList');
+    list.textContent = '';
+    list.appendChild(listTitle('あなたのタイムライン', true));
+    list.appendChild(axisLabel('▲ 古い'));
+    tlItems.forEach((m, i) => {
+      const el = placedCard(m, false, false);
+      const ok = tlRange(tlItems, i).d === 0;
+      el.classList.add(ok ? 'hit' : 'miss');
+      const mark = document.createElement('span');
+      mark.className = 'mark';
+      mark.textContent = ok ? '✔' : '✖';
+      el.prepend(mark);
+      if (!ok) {
+        // このカードのずれによる減点(薄く表示)。ずれ1つにつき1点
+        const minus = document.createElement('span');
+        minus.className = 'minus';
+        minus.textContent = '−' + tlRange(tlItems, i).d + '点';
+        const link = el.querySelector('a');
+        if (link) el.insertBefore(minus, link); else el.appendChild(minus);
+      }
+      list.appendChild(el);
+    });
+    list.appendChild(axisLabel('▼ 新しい'));
+
+    list.appendChild(listTitle('正しいタイムライン'));
+    list.appendChild(axisLabel('▲ 古い'));
+    for (const m of tlItems.slice().sort((x, y) => x.date - y.date)) {
+      list.appendChild(placedCard(m, false, false));
+    }
+    list.appendChild(axisLabel('▼ 新しい'));
+    show('result');
+  }
+
   // ================= 描画 =================
   function updateTimer() {
     // 小数点以下は表示しない
-    $('timer').textContent = Math.floor((performance.now() - startTime) / 1000);
+    const s = Math.floor((performance.now() - startTime) / 1000);
+    $('timer').textContent = s;
+    $('tlTimer').textContent = s;
   }
   function updateHud() {
     $('progress').textContent = placed.length - 1;
@@ -610,7 +854,24 @@
 
   // 操作説明: 常に同じ文言を表示する
   function updateHint() {
-    $('hint').textContent = '上ほど古く、下ほど新しい順。いつ頃か考えて、入る場所の「＋ここに置く」をタップ(間違えると破棄されます)';
+    $('hint').textContent = 'どこに位置する出来事か考えよう。上ほど古く、下ほど新しい';
+  }
+
+  // 結果一覧の見出し(「あなたのタイムライン」など)
+  // withLegend が true なら、同じ行に色の凡例(緑＝正しい位置 / 赤＝ずれ)を添える
+  function listTitle(text, withLegend) {
+    const el = document.createElement('div');
+    el.className = 'list-title';
+    el.textContent = text;
+    if (withLegend) {
+      const lg = document.createElement('span');
+      lg.className = 'legend-inline';
+      const ok = document.createElement('span'); ok.style.color = 'var(--ok)'; ok.textContent = '緑＝正しい位置';
+      const ng = document.createElement('span'); ng.style.color = 'var(--ng)'; ng.textContent = 'ずれ(減点)';
+      lg.append(ok, ' / ', ng);
+      el.append(' ', lg);
+    }
+    return el;
   }
 
   function axisLabel(text) {
@@ -640,13 +901,12 @@
 
   // 画面切り替え
   function show(name) {
-    for (const id of ['title', 'game', 'result']) $(id).classList.toggle('hidden', id !== name);
+    for (const id of ['title', 'game', 'tlGame', 'result']) $(id).classList.toggle('hidden', id !== name);
     window.scrollTo(0, 0);
   }
 
   // ================= 初期化 =================
   async function init() {
-    $('goalText').textContent = GOAL;
     updateModeView();
 
     try {
@@ -669,18 +929,31 @@
   // 効果音トグル: 前回の設定を復元し、変更したら保存する(localStorageが使えなくても動く)
   try { soundOn = localStorage.getItem(SOUND_KEY) !== 'off'; } catch (e) {}
   $('soundToggle').checked = soundOn;
+  const updateSoundLabel = () => { $('soundText').textContent = soundOn ? '効果音あり' : '効果音なし'; };
+  updateSoundLabel();
   $('soundToggle').addEventListener('change', e => {
     soundOn = e.target.checked;
+    updateSoundLabel();
     try { localStorage.setItem(SOUND_KEY, soundOn ? 'on' : 'off'); } catch (err) {}
     if (soundOn) { unlockAudio(); playSound('ok'); }   // オンにした瞬間に試し鳴りさせる
   });
 
-  // タイトル画面の表示を、選択中の難易度に合わせる(説明文と、その難易度のベスト記録)
+  // タイトル画面の表示を、選択中のゲーム種類・難易度に合わせる(説明文と、そのモードのベスト記録)
   function updateModeView() {
-    $('modeNote').textContent = MODE_NOTES[mode];
-    const best = loadBest(mode);
-    $('bestText').textContent = bestLabel(best);   // 記録がなければ「--」表示
+    $('typeText').textContent = TYPE_NOTES[gameType];
+    $('modeText').textContent = MODE_NOTES[mode];
+    const best = loadBest(gameType, mode);
+    $('bestText').textContent = bestLabel(best, gameType);   // 記録がなければ「--」表示
   }
+
+  // ゲーム種類トグル: 前回の設定を復元し、変更したら保存して表示を切り替える
+  try { gameType = localStorage.getItem(TYPE_KEY) === 'timeline' ? 'timeline' : 'quiz'; } catch (e) {}
+  $('typeToggle').checked = gameType === 'timeline';
+  $('typeToggle').addEventListener('change', e => {
+    gameType = e.target.checked ? 'timeline' : 'quiz';
+    try { localStorage.setItem(TYPE_KEY, gameType); } catch (err) {}
+    updateModeView();
+  });
 
   // 難易度トグル: 前回の設定を復元し、変更したら保存して表示を切り替える
   try { mode = localStorage.getItem(MODE_KEY) === 'hard' ? 'hard' : 'normal'; } catch (e) {}
@@ -691,8 +964,11 @@
     updateModeView();
   });
 
+  $('tlDone').addEventListener('click', finishTimeline);
   $('startBtn').addEventListener('click', startGame);
   $('retryBtn').addEventListener('click', startGame);
+  // タイトル画面に戻る(トグルと選択中モードのベスト表示はそのまま使える)
+  $('menuBtn').addEventListener('click', () => show('title'));
   init();
 })();
 </script>
