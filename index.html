@@ -353,7 +353,7 @@
     const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim() !== '');
     const header = lines.shift().split('\t');
     const col = name => header.indexOf(name);
-    const iTitle = col('できごと'), iDate = col('日'), iSrc = col('ソース');
+    const iTitle = col('できごと'), iDate = col('日'), iSrc = col('ソース'), iOff = col('除外');
 
     const memes = [];
     for (const line of lines) {
@@ -362,6 +362,9 @@
       const date = (cells[iDate] || '').trim();
       // 日付が8桁の数字になっていない行(未入力の行など)はスキップ
       if (!title || !/^\d{8}$/.test(date)) continue;
+      // 「除外」列に 1 などが入っている行は使わない(行はデータとして残しておく)
+      const off = iOff >= 0 ? (cells[iOff] || '').trim() : '';
+      if (off && off !== '0') continue;
       memes.push({
         title,
         date: Number(date),            // 比較用の数値 (例: 19951123)
