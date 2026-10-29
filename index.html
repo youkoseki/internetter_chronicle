@@ -658,10 +658,12 @@
   function tlPenalty(items) {
     return items.reduce((sum, _, i) => sum + tlRange(items, i).d, 0);
   }
-  // スコア: 100点から、ずれの合計(1つずれるごとに1点)を引く。
-  // 10枚が完全に逆順(ずれの合計が最大 = 50)のとき最低の50点になる
+  // スコア: ずれの合計(1つずれるごとに1点)を、満点から引く。
+  // 満点は「完全に逆順のときのずれの合計」= n*n/2(10枚なら50)。
+  // つまり全問正解で満点(10枚なら50点)、完全に逆順で0点になる
   function tlScore(items) {
-    return Math.max(0, 100 - tlPenalty(items));
+    const maxPenalty = Math.floor(items.length * items.length / 2);
+    return Math.max(0, maxPenalty - tlPenalty(items));
   }
 
   function startTimeline() {
